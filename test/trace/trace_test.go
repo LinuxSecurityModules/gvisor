@@ -108,14 +108,19 @@ func matchPoints(t *testing.T, msgs []test.Message) {
 		pb.MessageType_MESSAGE_SYSCALL_RAW:               {checker: checkSyscallRaw},
 		pb.MessageType_MESSAGE_SYSCALL_READ:              {checker: checkSyscallRead},
 		pb.MessageType_MESSAGE_SYSCALL_SOCKET:            {checker: checkSyscallSocket},
+		pb.MessageType_MESSAGE_SYSCALL_CHDIR:             {checker: checkSyscallChdir},
+		pb.MessageType_MESSAGE_SYSCALL_SETID:             {checker: checkSyscallSetid},
+		pb.MessageType_MESSAGE_SYSCALL_SETRESID:          {checker: checkSyscallSetresid},
+		pb.MessageType_MESSAGE_SYSCALL_CHROOT:            {checker: checkSyscallChroot},
+		pb.MessageType_MESSAGE_SYSCALL_DUP:               {checker: checkSyscallDup},
+		pb.MessageType_MESSAGE_SYSCALL_PRLIMIT64:         {checker: checkSyscallPrlimit64},
+		pb.MessageType_MESSAGE_SYSCALL_EVENTFD:           {checker: checkSyscallEventfd},
+		pb.MessageType_MESSAGE_SYSCALL_BIND:              {checker: checkSyscallSyscallBind},
+		pb.MessageType_MESSAGE_SYSCALL_ACCEPT:            {checker: checkSyscallSyscallAccept},
 
 		// TODO(gvisor.dev/issue/4805): Add validation for these messages.
-		pb.MessageType_MESSAGE_SYSCALL_ACCEPT:    {checker: checkTODO},
-		pb.MessageType_MESSAGE_SYSCALL_BIND:      {checker: checkTODO},
-		pb.MessageType_MESSAGE_SYSCALL_CLONE:     {checker: checkTODO},
-		pb.MessageType_MESSAGE_SYSCALL_DUP:       {checker: checkTODO},
-		pb.MessageType_MESSAGE_SYSCALL_PIPE:      {checker: checkTODO},
-		pb.MessageType_MESSAGE_SYSCALL_PRLIMIT64: {checker: checkTODO},
+		pb.MessageType_MESSAGE_SYSCALL_CLONE: {checker: checkTODO},
+		pb.MessageType_MESSAGE_SYSCALL_PIPE:  {checker: checkTODO},
 	}
 	for _, msg := range msgs {
 		t.Logf("Processing message type %v", msg.MsgType)
@@ -324,13 +329,13 @@ func checkSentryExec(msg test.Message) error {
 	if err := checkContextData(p.ContextData); err != nil {
 		return err
 	}
-	if want := "/bin/true"; want != p.BinaryPath {
+	if want := "/bin/true"; !strings.Contains(p.BinaryPath, want) {
 		return fmt.Errorf("wrong BinaryPath, want: %q, got: %q", want, p.BinaryPath)
 	}
 	if len(p.Argv) == 0 {
 		return fmt.Errorf("empty Argv")
 	}
-	if p.Argv[0] != p.BinaryPath {
+	if !strings.Contains(p.BinaryPath, p.Argv[0]) {
 		return fmt.Errorf("wrong Argv[0], want: %q, got: %q", p.BinaryPath, p.Argv[0])
 	}
 	if len(p.Env) == 0 {
@@ -439,6 +444,169 @@ func checkSyscallSocket(msg test.Message) error {
 	if want := int32(0); want != p.Protocol {
 		return fmt.Errorf("wrong Protocol, want: %v, got: %v", want, p.Protocol)
 	}
+
+	return nil
+}
+
+func checkSyscallSetid(msg test.Message) error {
+	p := pb.Setid{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if p.Id != 0 {
+		return fmt.Errorf(" Invalid ID: %d", p.Id)
+	}
+
+	return nil
+}
+
+func checkSyscallSetresid(msg test.Message) error {
+	p := pb.Setresid{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if p.GetRid() != 0 {
+		return fmt.Errorf(" Invalid RID: %d", p.Rid)
+	}
+	if p.GetEid() != 0 {
+		return fmt.Errorf(" Invalid EID: %d", p.Eid)
+	}
+	if p.GetSid() != 0 {
+		return fmt.Errorf(" Invalid SID: %d", p.Sid)
+	}
+
+	return nil
+}
+
+func checkSyscallChdir(msg test.Message) error {
+	p := pb.Chdir{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if !(p.Fd >= 3 || p.Fd == unix.AT_FDCWD) { // Constant used for all file-related syscalls.
+		return fmt.Errorf("invalid FD: %d", p.Fd)
+	}
+	if want := "trace_test.abc"; !strings.Contains(p.Pathname, want) {
+		return fmt.Errorf("wrong Pathname, want: %q, got: %q", want, p.Pathname)
+	}
+
+	return nil
+}
+
+func checkSyscallDup(msg test.Message) error {
+	p := pb.Dup{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if p.OldFd < 0 {
+		return fmt.Errorf("invalid FD: %d", p.OldFd)
+	}
+	if p.NewFd < 0 {
+		return fmt.Errorf("invalid FD: %d", p.NewFd)
+	}
+	if !(p.Flags == unix.O_CLOEXEC || p.Flags == 0) {
+		return fmt.Errorf("invalid flag got: %v", p.Flags)
+	}
+
+	return nil
+}
+
+func checkSyscallPrlimit64(msg test.Message) error {
+	p := pb.Prlimit{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if p.Pid < 0 {
+		return fmt.Errorf("invalid PID: %d", p.Pid)
+	}
+	return nil
+}
+
+func checkSyscallEventfd(msg test.Message) error {
+	p := pb.Eventfd{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if p.Val < 0 {
+		return fmt.Errorf("invalid PID: %d", p.Val)
+	}
+	if !(p.Flags == unix.EFD_NONBLOCK || p.Flags == 0) {
+		return fmt.Errorf("invalid Flag got: %d, ", p.Flags)
+	}
+
+	return nil
+}
+
+func checkSyscallSyscallBind(msg test.Message) error {
+	p := pb.Bind{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if p.Fd < 0 {
+		return fmt.Errorf("invalid FD: %d", p.Fd)
+	}
+	if p.FdPath == " " {
+		return fmt.Errorf("invalid Path: %d", p.FdPath)
+	}
+	if p.Address == nil {
+		return fmt.Errorf("invalid address: %d", p.Address)
+	}
+	return nil
+}
+
+func checkSyscallSyscallAccept(msg test.Message) error {
+	p := pb.Bind{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if p.Fd < 0 {
+		return fmt.Errorf("invalid FD: %d", p.Fd)
+	}
+	if p.FdPath == "" {
+		return fmt.Errorf("invalid Path: %d", p.FdPath)
+	}
+	if p.Address != nil {
+		return fmt.Errorf("invalid address: %d", p.Address)
+	}
+	return nil
+}
+
+func checkSyscallChroot(msg test.Message) error {
+	p := pb.Chroot{}
+	if err := proto.Unmarshal(msg.Msg, &p); err != nil {
+		return err
+	}
+	if err := checkContextData(p.ContextData); err != nil {
+		return err
+	}
+	if want := "trace_test.abc"; !strings.Contains(p.Pathname, want) {
+		return fmt.Errorf("wrong Pathname, want: %q, got: %q", want, p.Pathname)
+	}
+
 	return nil
 }
 

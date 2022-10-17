@@ -13,13 +13,23 @@
 // limitations under the License.
 
 #include <err.h>
+#include <fcntl.h>
+#include <sys/eventfd.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <unistd.h>
+
+#include <csignal>
+#include <iostream>
+#include <ostream>
 
 #include "absl/cleanup/cleanup.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
+#include "test/util/eventfd_util.h"
 #include "test/util/file_descriptor.h"
 #include "test/util/multiprocess_util.h"
 #include "test/util/posix_error.h"
@@ -39,7 +49,6 @@ void runForkExecve() {
   auto kill_or_error = ForkAndExecveat(root.get(), "/bin/true", argv, envv, 0,
                                        nullptr, &child, &execve_errno);
   ASSERT_EQ(0, execve_errno);
-
   // Don't kill child, just wait for gracefully exit.
   kill_or_error.ValueOrDie().Release();
   RetryEINTR(waitpid)(child, nullptr, 0);
@@ -115,12 +124,224 @@ void runSocket() {
   }
 }
 
+void runChdir() {
+  const auto pathname = "trace_test.abc";
+  static constexpr mode_t kDefaultDirMode = 0755;
+  int path_or_error = mkdir(pathname, kDefaultDirMode);
+  if (path_or_error != 0) {
+    err(1, "mkdir");
+  }
+  int res = chdir(pathname);
+  if (res != 0) {
+    err(1, "chdir");
+  }
+  rmdir(pathname);
+}
+
+void runFchdir() {
+  const auto pathname = "trace_test.abc";
+  static constexpr mode_t kDefaultDirMode = 0755;
+  int path_or_error = mkdir(pathname, kDefaultDirMode);
+  if (path_or_error != 0) {
+    err(1, "mkdir");
+  }
+  int fd = open(pathname, O_DIRECTORY | O_RDONLY);
+  int res = fchdir(fd);
+  if (res != 0) {
+    err(1, "fchdir");
+  }
+  rmdir(pathname);
+  close(fd);
+}
+
+void runSetgid() {
+  auto get = setgid(0);
+  if (get != 0) {
+    err(1, "setgid");
+  }
+}
+
+void runSetuid() {
+  auto get = setuid(0);
+  if (get != 0) {
+    err(1, "setuid");
+  }
+}
+
+void runSetsid() {
+  auto get = setsid();
+  // Operation is not permitted so we get an error.
+  if (get != -1) {
+    err(1, "setsid");
+  }
+}
+
+void runSetresuid() {
+  auto get = setresuid(0, 0, 0);
+  if (get != 0) {
+    err(1, "setresuid");
+  }
+}
+
+void runSetresgid() {
+  auto get = setresgid(0, 0, 0);
+  if (get != 0) {
+    err(1, "setresgid");
+  }
+}
+
+void runChroot() {
+  const auto pathname = "trace_test.abc";
+  static constexpr mode_t kDefaultDirMode = 0755;
+  int path_or_error = mkdir(pathname, kDefaultDirMode);
+  if (path_or_error != 0) {
+    err(1, "mkdir");
+  }
+  if (chroot(pathname)) {
+    err(1, "chroot");
+  }
+  rmdir(pathname);
+}
+void runDup() {
+  const auto pathname = "trace_test.abc";
+  static constexpr mode_t kDefaultDirMode = 0755;
+  int path_or_error = mkdir(pathname, kDefaultDirMode);
+  if (path_or_error != 0) {
+    err(1, "mkdir");
+  }
+  int fd = open(pathname, O_DIRECTORY | O_RDONLY);
+  int res = dup(fd);
+  if (res < 0) {
+    err(1, "dup");
+  }
+  rmdir(pathname);
+}
+void runDup2() {
+  const auto pathname = "trace_test.abc";
+  static constexpr mode_t kDefaultDirMode = 0755;
+  int path_or_error = mkdir(pathname, kDefaultDirMode);
+  if (path_or_error != 0) {
+    err(1, "mkdir");
+  }
+  int oldfd = open(pathname, O_DIRECTORY | O_RDONLY);
+  int newfd = open(pathname, O_DIRECTORY | O_RDONLY);
+  int res = dup2(oldfd, newfd);
+  if (res != newfd) {
+    err(1, "dup2");
+  }
+  rmdir(pathname);
+}
+void runDup3() {
+  const auto pathname = "trace_test.abc";
+  static constexpr mode_t kDefaultDirMode = 0755;
+  int path_or_error = mkdir(pathname, kDefaultDirMode);
+  if (path_or_error != 0) {
+    err(1, "mkdir");
+  }
+  int oldfd = open(pathname, O_DIRECTORY | O_RDONLY);
+  int newfd = open(pathname, O_DIRECTORY | O_RDONLY);
+  int res = dup3(oldfd, newfd, O_CLOEXEC);
+  if (res != newfd) {
+    err(1, "dup3");
+  }
+  rmdir(pathname);
+}
+
+void runPrlimit64() {
+  struct rlimit setlim;
+  setlim.rlim_cur = 0;
+  setlim.rlim_max = RLIM_INFINITY;
+  int res = prlimit(0, RLIMIT_DATA, &setlim, nullptr);
+  if (res != 0) {
+    err(1, "prlimit64");
+  }
+}
+
+void runEventfd() {
+  int res = eventfd(0, EFD_NONBLOCK);
+  if (res < 0) {
+    err(1, "eventfd");
+  }
+}
+
+void runEventfd2() {
+  int res = Eventdfd2Setup(0, EFD_NONBLOCK);
+  if (res < 0) {
+    err(1, "eventfd2");
+  }
+}
+
+void runBind() {
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  struct sockaddr_un addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  int res = bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+  if (res < 0) {
+    err(1, "bind");
+  }
+  auto server_closer = absl::MakeCleanup([fd] { close(fd); });
+}
+
+void runAccept() {
+  struct sockaddr_un addr;
+  addr.sun_family = AF_UNIX;
+
+  int server = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (server < 0) {
+    err(1, "socket");
+  }
+
+  int res = bind(server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+  if (res < 0) {
+    err(1, "bind");
+  }
+
+  if (listen(server, 5) < 0) {
+    err(1, "listen");
+  }
+
+  int client = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (client < 0) {
+    err(1, "socket");
+  }
+
+  if (connect(client, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) <
+      0) {
+    err(1, "connect");
+  }
+
+  res = RetryEINTR(accept)(server, nullptr, nullptr);
+  if (res < 0) {
+    err(1, "accept");
+  }
+
+  auto server_closer = absl::MakeCleanup([server] { close(server); });
+  auto client_closer = absl::MakeCleanup([client] { close(client); });
+}
+
 }  // namespace testing
 }  // namespace gvisor
 
 int main(int argc, char** argv) {
   ::gvisor::testing::runForkExecve();
   ::gvisor::testing::runSocket();
+  ::gvisor::testing::runChdir();
+  ::gvisor::testing::runFchdir();
+  ::gvisor::testing::runSetgid();
+  ::gvisor::testing::runSetuid();
+  ::gvisor::testing::runSetsid();
+  ::gvisor::testing::runSetresuid();
+  ::gvisor::testing::runSetresgid();
+  ::gvisor::testing::runChroot();
+  ::gvisor::testing::runDup();
+  ::gvisor::testing::runDup2();
+  ::gvisor::testing::runDup3();
+  ::gvisor::testing::runPrlimit64();
+  ::gvisor::testing::runEventfd();
+  ::gvisor::testing::runEventfd2();
+  ::gvisor::testing::runBind();
+  ::gvisor::testing::runAccept();
 
   return 0;
 }
