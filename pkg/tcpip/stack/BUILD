@@ -139,6 +139,7 @@ go_test(
     srcs = [
         "conntrack_test.go",
         "forwarding_test.go",
+        "gro_test.go",
         "iptables_test.go",
         "neighbor_cache_test.go",
         "neighbor_entry_test.go",
