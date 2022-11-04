@@ -133,6 +133,28 @@ loop:
 	return b.String(), nil
 }
 
+// PathnameInFilesystem returns an absolute path to vd relative to vd's
+// Filesystem root. It also appends //deleted to for disowned entries. It is
+// equivalent to Linux's dentry_path().
+func (vfs *VirtualFilesystem) PathnameInFilesystem(ctx context.Context, vd VirtualDentry) (string, error) {
+	b := getFSPathBuilder()
+	defer putFSPathBuilder(b)
+	if vd.dentry.IsDead() {
+		b.PrependString("//deleted")
+	}
+	if err := vd.mount.fs.impl.PrependPath(ctx, VirtualDentry{}, VirtualDentry{dentry: vd.dentry}, b); err != nil {
+		// We expect to encounted a non mount root as we traverse up the filesystem
+		// so it's safe to ignore this error.
+		switch err.(type) {
+		case PrependPathAtNonMountRootError:
+		default:
+			return "", err
+		}
+	}
+	b.PrependByte('/')
+	return b.String(), nil
+}
+
 // PathnameForGetcwd returns an absolute pathname to vd, consistent with
 // Linux's sys_getcwd().
 func (vfs *VirtualFilesystem) PathnameForGetcwd(ctx context.Context, vfsroot, vd VirtualDentry) (string, error) {
