@@ -123,16 +123,14 @@ func processVMRW(t *kernel.Task, args arch.SyscallArguments, isWrite bool) (uint
 	flags := args[5].Int()
 
 	switch {
-	case flags != 0:
+	case flags != 0 ||
+		liovcnt < 0 ||
+		riovcnt < 0 ||
+		liovcnt > linux.UIO_MAXIOV ||
+		riovcnt > linux.UIO_MAXIOV:
 		return 0, nil, linuxerr.EINVAL
-	case liovcnt < 0 || liovcnt > linux.UIO_MAXIOV:
-		return 0, nil, linuxerr.EINVAL
-	case riovcnt < 0 || riovcnt > linux.UIO_MAXIOV:
-		return 0, nil, linuxerr.EFAULT
 	case lvec == 0 || rvec == 0:
 		return 0, nil, linuxerr.EFAULT
-	case riovcnt > linux.UIO_MAXIOV || liovcnt > linux.UIO_MAXIOV:
-		return 0, nil, linuxerr.EINVAL
 	case liovcnt == 0 || riovcnt == 0:
 		return 0, nil, nil
 	}
@@ -158,6 +156,14 @@ func processVMRW(t *kernel.Task, args arch.SyscallArguments, isWrite bool) (uint
 func doProcessVMReadWrite(rProcess, wProcess *kernel.Task, rAddr, wAddr hostarch.Addr, rIovecCount, wIovecCount int) (uintptr, *kernel.SyscallControl, error) {
 	rCtx := rProcess.CopyContext(rProcess, usermem.IOOpts{})
 	wCtx := wProcess.CopyContext(wProcess, usermem.IOOpts{})
+
+	rCtx.LockTaskMemoryManager()
+	defer rCtx.UnlockTaskMemoryManager()
+
+	if rProcess.ThreadGroup().Leader() != wProcess.ThreadGroup().Leader() {
+		wCtx.LockTaskMemoryManager()
+		defer wCtx.UnlockTaskMemoryManager()
+	}
 
 	rIovecs, err := rCtx.CopyInIovecs(rAddr, rIovecCount)
 	if err != nil {
