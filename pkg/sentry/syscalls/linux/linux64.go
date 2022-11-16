@@ -30,10 +30,10 @@ const (
 	LinuxSysname = "Linux"
 
 	// LinuxRelease is the Linux release version number advertised by gVisor.
-	LinuxRelease = "4.4.0"
+	LinuxRelease = "5.15.0"
 
 	// LinuxVersion is the version info advertised by gVisor.
-	LinuxVersion = "#1 SMP Sun Jan 10 15:06:54 PST 2016"
+	LinuxVersion = "#1 SMP Tues Nov 15 15:06:54 PST 2022"
 )
 
 // AMD64 is a table of Linux amd64 syscall API with the corresponding syscall
