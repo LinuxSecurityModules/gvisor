@@ -53,8 +53,8 @@ dependencies are wrapped in a build container. It is possible to use
 
 Make sure the following dependencies are installed:
 
-*   Linux 4.14.77+ ([older linux][old-linux])
-*   [Docker version 17.09.0 or greater][docker]
+*   Linux 5.15
+*   [Docker version 22 or greater][docker]
 
 ### Building
 
@@ -81,25 +81,23 @@ To run specific tests, you can specify the target:
 make test TARGETS="//runsc:version_test"
 ```
 
-### Using `go get`
+### Change Config 
+```
+sudo runsc install --runtime runsc-debug -- \
+  --debug \
+  --debug-log=/tmp/runsc-debug.log \
+  --strace \
+  --log-packets
 
-This project uses [bazel][bazel] to build and manage dependencies. A synthetic
-`go` branch is maintained that is compatible with standard `go` tooling for
-convenience.
-
-For example, to build and install `runsc` directly from this branch:
-
-```sh
-echo "module runsc" > go.mod
-GO111MODULE=on go get gvisor.dev/gvisor/runsc@go
-CGO_ENABLED=0 GO111MODULE=on sudo -E go build -o /usr/local/bin/runsc gvisor.dev/gvisor/runsc
 ```
 
-Subsequently, you can build and install the shim binary for `containerd`:
-
-```sh
-GO111MODULE=on sudo -E go build -o /usr/local/bin/containerd-shim-runsc-v1 gvisor.dev/gvisor/shim
+### Run with docker
 ```
+/usr/local/bin/runsc install
+sudo systemctl reload docker
+docker run --runtime=runsc --rm -it ubuntu:22.04 /bin/bash
+```
+
 
 Note that this branch is supported in a best effort capacity, and direct
 development on this branch is not supported. Development should occur on the
